@@ -101,6 +101,25 @@ def main() -> None:
     Wraps :func:`_amain` in :func:`asyncio.run` so the `prufa-mcp` console
     script (which doesn't await coroutines) works correctly.
     """
+    parser = argparse.ArgumentParser(description="Prufa MCP server (OSS)")
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="print the prufa-mcp version and exit",
+    )
+    args, _ = parser.parse_known_args()
+
+    if args.version:
+        try:
+            from importlib.metadata import version
+
+            print(version("prufa-mcp"))
+        except Exception:
+            from prufa_mcp import __version__
+
+            print(__version__)
+        sys.exit(0)
+
     asyncio.run(_amain())
 
 
