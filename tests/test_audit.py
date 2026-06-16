@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 import httpx
 
-from prufa_mcp.audit import get_report, run_audit, _share_token_from_report_url
+from prufa_mcp.audit import (
+    get_report,
+    run_audit,
+    _api_base,
+    _api_token,
+    _share_token_from_report_url,
+)
 
 
 def test_run_audit_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,6 +238,88 @@ def test_get_report_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch) 
     assert attempts["n"] == 4, "1 initial attempt + 3 retries"
     assert result["error"] == "not_found"
     assert result["http_status"] == 429
+
+
+# --- JSON config file (issue #2) ----------------------------------------------
+# The server reads PRUFA_API_BASE / PRUFA_API_TOKEN from env, but config-as-code
+# users can drop a JSON file at ~/.config/prufa/mcp.json (PRUFA_CONFIG overrides
+# the path). Env vars take precedence over the file.
+
+
+def test_config_file_provides_token_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """With no env token, the api_token is read from the config file."""
+    monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({"api_token": "from-config", "api_base": "https://cfg.example"}))
+    monkeypatch.setenv("PRUFA_CONFIG", str(cfg))
+
+    assert _api_token() == "from-config"
+    assert _api_base() == "https://cfg.example"
+
+
+def test_env_overrides_config_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Env vars win over the config file, so existing setups never change."""
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({"api_token": "from-config", "api_base": "https://cfg.example"}))
+    monkeypatch.setenv("PRUFA_CONFIG", str(cfg))
+    monkeypatch.setenv("PRUFA_API_TOKEN", "from-env")
+    monkeypatch.setenv("PRUFA_API_BASE", "https://env.example")
+
+    assert _api_token() == "from-env"
+    assert _api_base() == "https://env.example"
+
+
+def test_api_base_defaults_when_nothing_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """No env, no config file → the hosted default."""
+    monkeypatch.delenv("PRUFA_API_BASE", raising=False)
+    monkeypatch.setenv("PRUFA_CONFIG", str(tmp_path / "does-not-exist.json"))
+    assert _api_base() == "https://app.prufa.dev"
+
+
+def test_malformed_config_falls_back_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+) -> None:
+    """A malformed config file is ignored with a stderr warning (no silent
+    failure), and resolution falls back to env/defaults."""
+    monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text("{not valid json")
+    monkeypatch.setenv("PRUFA_CONFIG", str(cfg))
+
+    assert _api_token() == ""  # falls back, doesn't raise
+    assert _api_base() == "https://app.prufa.dev"
+    assert "ignoring unreadable config" in capsys.readouterr().err
+
+
+def test_config_token_flows_through_run_audit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """An audit authenticated purely via the config file uses both the
+    config token (Bearer header) and config api_base (request host)."""
+    monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
+    monkeypatch.delenv("PRUFA_API_BASE", raising=False)
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({"api_token": "cfg-token", "api_base": "https://cfg.example"}))
+    monkeypatch.setenv("PRUFA_CONFIG", str(cfg))
+    captured: dict[str, Any] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["host"] = request.url.host
+        captured["auth"] = request.headers.get("Authorization")
+        return httpx.Response(
+            202, json={"run_id": "r", "status": "queued", "report_url": "/r/slug"}
+        )
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_run_audit(transport, "https://example.com", wait=False))
+
+    assert result["status"] == "queued"
+    assert captured["host"] == "cfg.example"
+    assert captured["auth"] == "Bearer cfg-token"
 
 
 # --- Test helpers --------------------------------------------------------------

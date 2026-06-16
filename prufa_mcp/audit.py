@@ -16,26 +16,83 @@ audit creation response (`report_url: /r/<slug>`).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 
-PRUFA_API_BASE = os.environ.get("PRUFA_API_BASE", "https://app.prufa.dev")
+_DEFAULT_API_BASE = "https://app.prufa.dev"
+
+
+def _config_path() -> Path:
+    """Location of the optional JSON config file.
+
+    Defaults to ``~/.config/prufa/mcp.json`` (honoring ``XDG_CONFIG_HOME``).
+    ``PRUFA_CONFIG`` overrides the path outright — handy for tests and for
+    pinning a config in non-standard layouts.
+    """
+    override = os.environ.get("PRUFA_CONFIG")
+    if override:
+        return Path(override)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "prufa" / "mcp.json"
+
+
+def _load_config() -> dict[str, Any]:
+    """Read the optional JSON config file.
+
+    Returns an empty dict when the file is absent. A present-but-malformed
+    file is not swallowed silently (per the no-silent-failures invariant):
+    we warn on stderr — which is safe, since the MCP protocol owns stdout —
+    and fall back to env/defaults rather than crashing the server.
+    """
+    path = _config_path()
+    try:
+        with path.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"prufa-mcp: ignoring unreadable config at {path}: {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print(f"prufa-mcp: ignoring config at {path}: expected a JSON object", file=sys.stderr)
+        return {}
+    return data
 
 
 def _api_token() -> str:
-    """Read the API token fresh on every call.
+    """Resolve the API token fresh on every call.
 
-    Module-level capture (the v0.1.0 pattern) breaks tests that set
-    the env var after import — and forces a process restart for any
-    token rotation. Reading it per-call is also how the monorepo MCP
-    server does it.
+    Precedence: ``PRUFA_API_TOKEN`` env var (so runtime env always wins and
+    token rotation needs no restart), then ``api_token`` from the config
+    file, then empty. Module-level capture (the v0.1.0 pattern) broke tests
+    that set the env var after import — reading per-call avoids that.
     """
-    return os.environ.get("PRUFA_API_TOKEN", "")
+    env = os.environ.get("PRUFA_API_TOKEN")
+    if env:
+        return env
+    return str(_load_config().get("api_token") or "")
+
+
+def _api_base() -> str:
+    """Resolve the API base URL.
+
+    Precedence mirrors :func:`_api_token`: ``PRUFA_API_BASE`` env var, then
+    ``api_base`` from the config file, then the hosted default.
+    """
+    env = os.environ.get("PRUFA_API_BASE")
+    if env:
+        return env
+    return str(_load_config().get("api_base") or _DEFAULT_API_BASE)
+
 
 # The audit API takes ~25-60s for typical sites; cap polling at 90s
 # to match the monorepo MCP server's behavior.
@@ -65,6 +122,8 @@ async def _send_with_retry(send: Any, *args: Any, **kwargs: Any) -> httpx.Respon
         await asyncio.sleep(backoff)
         response = await send(*args, **kwargs)
     return response
+
+
 _UUID_LIKE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -102,7 +161,7 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
         # The API ignores `wait` on creation — it always returns 202 queued.
         create = await _send_with_retry(
             client.post,
-            f"{PRUFA_API_BASE}/api/v1/audits",
+            f"{_api_base()}/api/v1/audits",
             json={"url": url},
             headers=headers,
         )
@@ -131,7 +190,7 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
             try:
                 run_resp = await _send_with_retry(
                     client.get,
-                    f"{PRUFA_API_BASE}/api/v1/audits/{run_id}",
+                    f"{_api_base()}/api/v1/audits/{run_id}",
                     headers={"Authorization": f"Bearer {_api_token()}"},
                 )
             except httpx.HTTPError:
@@ -143,13 +202,13 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
                 if share_token:
                     rep_resp = await _send_with_retry(
                         client.get,
-                        f"{PRUFA_API_BASE}/api/v1/reports/by-token/{share_token}",
+                        f"{_api_base()}/api/v1/reports/by-token/{share_token}",
                         headers={"Authorization": f"Bearer {_api_token()}"},
                     )
                 else:
                     rep_resp = await _send_with_retry(
                         client.get,
-                        f"{PRUFA_API_BASE}/api/v1/audits/{run_id}/report.json",
+                        f"{_api_base()}/api/v1/audits/{run_id}/report.json",
                         headers={"Authorization": f"Bearer {_api_token()}"},
                     )
                 if rep_resp.status_code == 200:
@@ -213,7 +272,7 @@ async def get_report(*, report_id: str) -> dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            response = await _send_with_retry(client.get, f"{PRUFA_API_BASE}{path}", headers=headers)
+            response = await _send_with_retry(client.get, f"{_api_base()}{path}", headers=headers)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             # 404 on the UUID endpoint means "no run with that UUID";
