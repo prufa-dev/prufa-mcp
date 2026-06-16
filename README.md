@@ -9,7 +9,7 @@ before the 5-hour window opens.
 
 ## 30-second demo
 
-![Installing prufa-mcp and wiring it into Claude Code](assets/demo.gif)
+![Installing prufa-mcp and wiring it into Claude Code](https://raw.githubusercontent.com/prufa-dev/prufa-mcp/main/assets/demo.gif)
 
 ## Install
 

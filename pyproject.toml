@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prufa-mcp"
-version = "0.1.3"
+version = "0.1.4"
 description = "The QA agent for your vibe-coded app. Apache-2.0 MCP server."
 readme = "README.md"
 license = { text = "Apache-2.0" }
