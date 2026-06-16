@@ -1,21 +1,84 @@
 # prufa-mcp — the QA agent for your vibe-coded app
 
-> "Median 5 hours from vulnerability disclosure to mass automated exploitation."
-> — [Patchstack 2026 State of WordPress Security](https://www.propellermediaworks.com/blog/web-security-ai-hackers-risk-vibe-coding)
+**Vibe-coded apps ship faster than anyone can review them.** In June 2026 we
+audited [49 fresh Show HN launches](https://prufa.dev/blog/engineering/we-audited-49-show-hn-launches/) —
+**38 had a critical bug on day one**: a broken signup, a silent console error,
+analytics that never fired, a consent banner that did nothing.
 
-Vibe-coded apps ship faster than humans can review. Prufa is the agent that
-audits them — tracking pixels, broken flows, consent violations, console errors —
-before the 5-hour window opens.
+Prufa is the agent that catches those before your users do. Point it at a URL
+and it audits the things humans skip when they're moving fast — broken flows,
+JS console errors, missing tracking, consent violations, security headers,
+mobile tap targets, accessibility — and hands back machine-verified findings,
+graded A–F. This repo is the open-source MCP server that wires that audit
+straight into your coding agent.
 
 ## 30-second demo
 
 ![Installing prufa-mcp and wiring it into Claude Code](https://raw.githubusercontent.com/prufa-dev/prufa-mcp/main/assets/demo.gif)
 
+## What an audit gives you
+
+Ask your agent to `audit https://yourapp.com` and `prufa_run_audit` returns one
+JSON report. Findings are grouped into graded sections, each finding carries a
+severity, the **impact** (why it matters), and a **fix hint**. Real output,
+trimmed:
+
+```jsonc
+{
+  "url": "https://yourapp.com",
+  "headline": "2 warnings found",
+  "counts": { "critical": 0, "warning": 2, "info": 5 },
+  "sections": [
+    { "label": "Works",     "grade": "C", "counts": { "warning": 2, "info": 1 } },
+    { "label": "Fast",      "grade": "A" },
+    { "label": "Found",     "grade": "A" },
+    { "label": "Compliant", "grade": "A" }
+  ],
+  "check_results": [
+    {
+      "check_id": "ux",
+      "findings": [{
+        "severity": "warning",
+        "title": "2 javascript console error(s) during page load",
+        "impact": "Errors at load time often mean broken features visitors never report.",
+        "evidence": { "count": 2, "sample": [
+          "Access to XMLHttpRequest at 'https://api.fontshare.com/...' blocked by CORS policy",
+          "Failed to load resource: net::ERR_FAILED"
+        ]}
+      }]
+    },
+    {
+      "check_id": "mobile",
+      "findings": [{
+        "severity": "warning",
+        "title": "13 tap target(s) smaller than 24px",
+        "impact": "Fingers are not cursors — undersized buttons mean mis-taps on exactly the elements you want pressed.",
+        "fix_hint": "Give interactive elements at least 24x24px of hit area (WCAG 2.5.8)."
+      }]
+    },
+    {
+      "check_id": "security",
+      "findings": [{
+        "severity": "info",
+        "title": "no Content-Security-Policy header",
+        "impact": "Without a CSP, one injected script owns the page — and every third-party tag you load is trusted completely.",
+        "fix_hint": "Start with a report-only CSP and tighten from real violation reports."
+      }]
+    }
+  ],
+  "report_url": "/r/G82RpzTi_zn-o71_XoMLCprP7uvCQP87"
+}
+```
+
+`report_url` is a shareable HTML version of the same report. The full payload
+also includes `tracking`, `consent`, `seo`/`aeo`, `a11y`, `forms`, and detected
+user flows — see [the OSS surface](#what-you-get-the-oss-surface) below.
+
 ## Install
 
-The package is on [PyPI](https://pypi.org/project/prufa-mcp/) (v0.1.3). Install it
-globally with `pipx` (recommended — installs into an isolated venv and exposes
-the `prufa-mcp` binary on your PATH) or into a project venv with `pip`:
+The package is on [PyPI](https://pypi.org/project/prufa-mcp/). Install it
+globally with `pipx` (recommended — isolated venv, exposes the `prufa-mcp`
+binary on your PATH) or into a project venv with `pip`:
 
 ```bash
 # Recommended — global install, isolated venv
@@ -24,15 +87,17 @@ pipx install prufa-mcp
 # Or, into your project venv
 pip install prufa-mcp
 
+# Pin a specific version with ==, e.g. pipx install prufa-mcp==0.1.3
+
 # Verify the binary is on PATH
 which prufa-mcp
 # Should print something like: /Users/you/.local/bin/prufa-mcp
 ```
 
-You also need a free Prufa API key. The first audit is free, no card required.
+You also need a free Prufa API key. **The first audit is free, no card required.**
 
 1. Sign in at [prufa.dev](https://prufa.dev) (Google OAuth)
-2. Create an API key from the dashboard — or via the CLI: `prufa keys mint "<name>"`
+2. Create an API key from the dashboard
 
 ## Wire into your agent
 
@@ -85,23 +150,8 @@ In your project root or in `~/.config/Claude/` etc.:
 Restart the host app. The command path must be the absolute binary path
 (not `~`, not `$()`) — those don't expand in MCP config.
 
-### Config-as-code (`~/.config/prufa/mcp.json`)
-
-If you'd rather not pass credentials through env, drop a JSON file at
-`~/.config/prufa/mcp.json` (honors `XDG_CONFIG_HOME`; `PRUFA_CONFIG` overrides
-the path):
-
-```json
-{
-  "api_token": "your-prufa-api-key",
-  "api_base": "https://app.prufa.dev"
-}
-```
-
-Environment variables take precedence over the file, so `PRUFA_API_TOKEN` /
-`PRUFA_API_BASE` always win when set. Both keys are optional — `api_base`
-defaults to the hosted API. A malformed file is ignored with a warning on
-stderr rather than crashing the server.
+> Prefer config files to env vars? Drop your token in
+> `~/.config/prufa/mcp.json` instead — see [ADVANCED.md](ADVANCED.md).
 
 ## Use it
 
@@ -125,8 +175,20 @@ state plus a `share_token` you can poll with `prufa_get_report`.
 | `prufa_run_audit(url, wait=true)` | Triggers a public-page audit, polls until done, returns findings JSON. The `wait` flag is honored — it actually blocks. |
 | `prufa_get_report(report_id)` | Fetches a report. `report_id` is EITHER the run UUID (from `prufa_run_audit`'s `run_id` field) OR the `share_token` (the slug from `/r/<token>` in the audit creation `report_url`). The slug is what you'll see most often — use that. |
 
-The other ~13 tools (workspace setup, flows, monitors, alerts, billing) live in
-the hosted product at [prufa.dev](https://prufa.dev).
+## Beyond the snapshot
+
+A free audit is a **snapshot** — it looks at your app once. The hosted product
+turns that into something that **walks your flows and watches for regressions**:
+
+- **Deep QA flows** — describe a journey in plain language ("log in, add to cart,
+  check out"); Prufa compiles it to a reviewable spec and runs it end-to-end in a
+  real browser, asserting every step.
+- **Monitors** — re-run any audit or flow on a schedule and get alerted the
+  moment a grade drops or a flow breaks.
+- **Slack alerts, workspaces, billing** — and ~13 more tools.
+
+The audit already detects your flows for you (the `flows` check in every report).
+Turn them on at **[prufa.dev](https://prufa.dev)** — free audits look, monitors walk.
 
 ## Examples
 
@@ -145,7 +207,7 @@ python examples/nextjs-app/audit.py https://your-nextjs-app.com
 
 ## GitHub Action
 
-Add PR-time audits to any repo:
+Fail a PR when Prufa finds a critical regression:
 
 ```yaml
 # .github/workflows/prufa-scan.yml
@@ -165,30 +227,22 @@ jobs:
           PRUFA_API_TOKEN: ${{ secrets.PRUFA_API_TOKEN }}
         run: |
           python -c "
-          import asyncio, json, sys
+          import asyncio, sys
           from prufa_mcp.audit import run_audit
-          result = asyncio.run(run_audit(url='${{ secrets.STAGING_URL }}', wait=True))
-          print(json.dumps(result, indent=2))
-          criticals = [f for f in result.get('findings', []) if f.get('severity') == 'critical']
+          report = asyncio.run(run_audit(url='${{ secrets.STAGING_URL }}', wait=True))
+          print(report.get('headline', 'audit complete'))
+          criticals = report.get('counts', {}).get('critical', 0)
           if criticals:
-              print(f'::error::Prufa found {len(criticals)} critical finding(s)', file=sys.stderr)
+              print(f'::error::Prufa found {criticals} critical finding(s)', file=sys.stderr)
               sys.exit(1)
           "
 ```
 
 See `examples/prufa-scan.yml` for the full template.
 
-## SLO
-
-- **Hosted audit API:** 30-second p95 for `wait=true` on public pages.
-- **OSS MCP server:** thin client — its only SLO is "responds to MCP `list_tools` and `call_tool` within 1 second" (the heavy work happens server-side).
-
-## Versioning
-
-Published via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) from
-the GitHub Action on every `v*` tag. Install a specific version with
-`pipx install prufa-mcp==0.1.3` or `pip install prufa-mcp==0.1.3`.
-
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE). Contributions welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+</content>
+</invoke>
