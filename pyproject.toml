@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prufa-mcp"
-version = "0.1.4"
+dynamic = ["version"]
 description = "The QA agent for your vibe-coded app. Apache-2.0 MCP server."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -46,6 +46,9 @@ Issues = "https://github.com/prufa-dev/prufa-mcp/issues"
 
 [tool.setuptools]
 packages = ["prufa_mcp"]
+
+[tool.setuptools.dynamic]
+version = { attr = "prufa_mcp.__version__" }
 
 [tool.pytest.ini_options]
 addopts = "-q"

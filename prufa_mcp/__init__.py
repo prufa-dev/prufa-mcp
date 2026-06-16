@@ -1,2 +1,2 @@
 """Prufa MCP — the QA agent for your vibe-coded app."""
-__version__ = "0.1.3"
+__version__ = "0.1.4"
