@@ -185,7 +185,7 @@ turns that into something that **walks your flows and watches for regressions**:
   real browser, asserting every step.
 - **Monitors** — re-run any audit or flow on a schedule and get alerted the
   moment a grade drops or a flow breaks.
-- **Slack alerts, workspaces, billing** — and ~13 more tools.
+- **Slack alerts, workspaces, billing, gremlin runs** — ~22 more tools (the MCP surface is 24 tools total; 2 ship here, the rest are hosted).
 
 The audit already detects your flows for you (the `flows` check in every report).
 Turn them on at **[prufa.dev](https://prufa.dev)** — free audits look, monitors walk.
