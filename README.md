@@ -1,5 +1,7 @@
 # prufa-mcp — the QA agent for your vibe-coded app
 
+<!-- mcp-name: io.github.prufa-dev/prufa-mcp -->
+
 **Vibe-coded apps ship faster than anyone can review them.** In June 2026 we
 audited [49 fresh Show HN launches](https://prufa.dev/blog/engineering/we-audited-49-show-hn-launches/) —
 **38 had a critical bug on day one**: a broken signup, a silent console error,
