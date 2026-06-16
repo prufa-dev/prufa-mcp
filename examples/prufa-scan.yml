@@ -29,9 +29,9 @@ jobs:
           from prufa_mcp.audit import run_audit
           result = asyncio.run(run_audit(url='${{ secrets.STAGING_URL }}', wait=True))
           print(json.dumps(result, indent=2))
-          criticals = [f for f in result.get('findings', []) if f.get('severity') == 'critical']
+          criticals = result.get('counts', {}).get('critical', 0)
           if criticals:
-              print(f'::error::Prufa found {len(criticals)} critical finding(s)', file=sys.stderr)
+              print(f'::error::Prufa found {criticals} critical finding(s)', file=sys.stderr)
               sys.exit(1)
           "
 
