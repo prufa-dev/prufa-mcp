@@ -163,6 +163,76 @@ def test_run_audit_no_wait_returns_immediately(monkeypatch: pytest.MonkeyPatch) 
     assert result["run_id"] == "11111111-2222-3333-4444-555555555555"
 
 
+# --- Retry-with-backoff (issue #1) --------------------------------------------
+# The hosted API is rate-limited. A 429 must trigger exponential-backoff retries
+# (1s/2s/4s) rather than surfacing the error on the first hit.
+
+
+def test_run_audit_retries_on_429_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 on audit creation is retried; the next attempt succeeds."""
+    monkeypatch.setenv("PRUFA_API_TOKEN", "test-token")
+    monkeypatch.setattr("prufa_mcp.audit._RETRY_BACKOFFS_S", (0.0, 0.0, 0.0))  # no real sleeping
+    attempts = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(429, json={"detail": "rate limited"})
+        return httpx.Response(
+            202,
+            json={
+                "run_id": "11111111-2222-3333-4444-555555555555",
+                "status": "queued",
+                "report_url": "/r/abc-slug",
+            },
+        )
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_run_audit(transport, "https://example.com", wait=False))
+
+    assert attempts["n"] == 2, "should have retried once after the 429"
+    assert result["status"] == "queued"
+    assert result["share_token"] == "abc-slug"
+
+
+def test_get_report_retries_on_429_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 on report fetch is retried with backoff before succeeding."""
+    monkeypatch.setenv("PRUFA_API_TOKEN", "test-token")
+    monkeypatch.setattr("prufa_mcp.audit._RETRY_BACKOFFS_S", (0.0, 0.0, 0.0))
+    attempts = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] <= 2:
+            return httpx.Response(429, json={"detail": "rate limited"})
+        return httpx.Response(200, json={"run_id": "x", "status": "succeeded", "findings": []})
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_get_report(transport, "some-share-token"))
+
+    assert attempts["n"] == 3, "two 429s then success"
+    assert result["status"] == "succeeded"
+
+
+def test_get_report_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A persistent 429 is retried 3 times (4 attempts total), then surfaces
+    as a clean error rather than retrying forever."""
+    monkeypatch.setenv("PRUFA_API_TOKEN", "test-token")
+    monkeypatch.setattr("prufa_mcp.audit._RETRY_BACKOFFS_S", (0.0, 0.0, 0.0))
+    attempts = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(429, json={"detail": "rate limited"})
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_get_report(transport, "some-share-token"))
+
+    assert attempts["n"] == 4, "1 initial attempt + 3 retries"
+    assert result["error"] == "not_found"
+    assert result["http_status"] == 429
+
+
 # --- Test helpers --------------------------------------------------------------
 
 

@@ -41,6 +41,30 @@ def _api_token() -> str:
 # to match the monorepo MCP server's behavior.
 _POLL_INTERVAL_S = 3.0
 _POLL_MAX_ITERS = 30
+
+# The hosted API is rate-limited. On HTTP 429 the OSS client retries with
+# exponential backoff before giving up: one initial attempt, then retries
+# sleeping 1s, 2s, 4s. Non-429 responses are returned immediately; network
+# errors are not swallowed (they propagate to the caller).
+_RETRY_BACKOFFS_S = (1.0, 2.0, 4.0)
+
+
+async def _send_with_retry(send: Any, *args: Any, **kwargs: Any) -> httpx.Response:
+    """Issue an httpx request, retrying on HTTP 429 with exponential backoff.
+
+    `send` is a bound httpx method (e.g. ``client.get`` / ``client.post``).
+    Makes one initial attempt, then up to ``len(_RETRY_BACKOFFS_S)`` retries,
+    sleeping the scheduled backoff before each one. Returns the final
+    response — including a 429 if every attempt was rate-limited — so the
+    caller's existing status handling still applies.
+    """
+    response = await send(*args, **kwargs)
+    for backoff in _RETRY_BACKOFFS_S:
+        if response.status_code != 429:
+            return response
+        await asyncio.sleep(backoff)
+        response = await send(*args, **kwargs)
+    return response
 _UUID_LIKE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -76,7 +100,8 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {_api_token()}", "Idempotency-Key": f"mcp-{url}"}
     async with httpx.AsyncClient(timeout=30.0) as client:
         # The API ignores `wait` on creation — it always returns 202 queued.
-        create = await client.post(
+        create = await _send_with_retry(
+            client.post,
             f"{PRUFA_API_BASE}/api/v1/audits",
             json={"url": url},
             headers=headers,
@@ -104,7 +129,8 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
         for _ in range(_POLL_MAX_ITERS):
             await asyncio.sleep(_POLL_INTERVAL_S)
             try:
-                run_resp = await client.get(
+                run_resp = await _send_with_retry(
+                    client.get,
                     f"{PRUFA_API_BASE}/api/v1/audits/{run_id}",
                     headers={"Authorization": f"Bearer {_api_token()}"},
                 )
@@ -115,12 +141,14 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
             run = run_resp.json()
             if run.get("status") in {"succeeded", "failed", "blocked", "timeout"}:
                 if share_token:
-                    rep_resp = await client.get(
+                    rep_resp = await _send_with_retry(
+                        client.get,
                         f"{PRUFA_API_BASE}/api/v1/reports/by-token/{share_token}",
                         headers={"Authorization": f"Bearer {_api_token()}"},
                     )
                 else:
-                    rep_resp = await client.get(
+                    rep_resp = await _send_with_retry(
+                        client.get,
                         f"{PRUFA_API_BASE}/api/v1/audits/{run_id}/report.json",
                         headers={"Authorization": f"Bearer {_api_token()}"},
                     )
@@ -185,7 +213,7 @@ async def get_report(*, report_id: str) -> dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            response = await client.get(f"{PRUFA_API_BASE}{path}", headers=headers)
+            response = await _send_with_retry(client.get, f"{PRUFA_API_BASE}{path}", headers=headers)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             # 404 on the UUID endpoint means "no run with that UUID";
