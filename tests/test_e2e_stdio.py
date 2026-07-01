@@ -30,7 +30,8 @@ async def _drive() -> dict:
     out: dict = {}
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            init = await session.initialize()
+            out["server_version"] = init.serverInfo.version
             listed = await session.list_tools()
             out["tool_names"] = sorted(t.name for t in listed.tools)
 
@@ -48,7 +49,11 @@ async def _drive() -> dict:
 
 
 def test_stdio_server_end_to_end() -> None:
+    import prufa_mcp
+
     out = asyncio.run(asyncio.wait_for(_drive(), timeout=30))
+    # serverInfo.version reports OUR package version, not the mcp SDK's.
+    assert out["server_version"] == prufa_mcp.__version__, out["server_version"]
     # Full surface is served.
     assert len(out["tool_names"]) == 44, out["tool_names"]
     for expected in (
