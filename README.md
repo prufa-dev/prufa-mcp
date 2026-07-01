@@ -170,27 +170,94 @@ completes and returns the JSON report directly — typically 25–60s for a publ
 page. If you set `wait=false`, the call returns immediately with the queued
 state plus a `share_token` you can poll with `prufa_get_report`.
 
-## What you get (the OSS surface)
+## What you get — the full agent surface
 
+`prufa-mcp` exposes **the whole product** over MCP (44 tools). Point your agent
+at Prufa and it can audit pages, drive multi-step flows, watch for regressions,
+run chaos tests, run full-auto discovery, and manage the workspace + billing —
+no dashboard round-trip. Free/anonymous tools need no card; Pro tools return the
+API's `402` with a checkout link when you're not on a plan (the tool is visible,
+the paywall is server-side).
+
+### Audit & reports
 | Tool | What it does |
 |---|---|
-| `prufa_run_audit(url, wait=true)` | Triggers a public-page audit, polls until done, returns findings JSON. The `wait` flag is honored — it actually blocks. |
-| `prufa_get_report(report_id)` | Fetches a report. `report_id` is EITHER the run UUID (from `prufa_run_audit`'s `run_id` field) OR the `share_token` (the slug from `/r/<token>` in the audit creation `report_url`). The slug is what you'll see most often — use that. |
+| `prufa_run_audit(url, wait=true)` | One-shot public-page audit; blocks and returns findings JSON. |
+| `prufa_get_report(run_id?, share_token?)` | Fetch a report by UUID or `/r/` slug. |
+| `prufa_get_run(run_id)` | Poll a run's status. |
+| `prufa_list_runs(limit)` | Recent runs in the workspace. |
+| `prufa_get_finding(run_id, finding_key?)` | Persisted findings, machine-readable. |
+| `prufa_list_alerts()` | Alert ledger (newest first, incl. suppressions). |
 
-## Beyond the snapshot
+### Workspace, usage & conversion
+| Tool | What it does |
+|---|---|
+| `prufa_setup_workspace(owner_email, name?)` | Create a **free, no-card** `agent_temp` workspace (7-day trial) and return an API token **once**. If a token is already set, returns the real workspace + trial state. |
+| `prufa_get_workspace()` | Current workspace + inlined usage + a `trial` block. |
+| `prufa_get_usage()` | Usage object + `trial`/`upsell` blocks — call before metered actions. |
+| `prufa_workspace_settings(...)` | Usage webhook, auto-recharge, email/Slack switches. |
+| `prufa_set_notifications(cells)` | The 9-event × {email, slack} routing matrix. |
 
-A free audit is a **snapshot** — it looks at your app once. The hosted product
-turns that into something that **walks your flows and watches for regressions**:
+### Billing (returns a URL for the human to open — never takes a card)
+| Tool | What it does |
+|---|---|
+| `prufa_upgrade_plan(tier)` | Stripe checkout URL for a paid plan (starter/pro/team). |
+| `prufa_buy_credits(credits)` | Stripe checkout URL for a one-time credit pack. |
+| `prufa_billing_portal()` | Stripe customer portal URL (card, invoices, cancel). |
 
-- **Deep QA flows** — describe a journey in plain language ("log in, add to cart,
-  check out"); Prufa compiles it to a reviewable spec and runs it end-to-end in a
-  real browser, asserting every step.
-- **Monitors** — re-run any audit or flow on a schedule and get alerted the
-  moment a grade drops or a flow breaks.
-- **Slack alerts, workspaces, billing, gremlin runs** — ~22 more tools (the MCP surface is 24 tools total; 2 ship here, the rest are hosted).
+### Flows (describe a journey → reviewable spec → run)
+| Tool | What it does |
+|---|---|
+| `prufa_create_flow(url, test_case, name?)` | Compile a plain-text test case to a **draft** spec. |
+| `prufa_confirm_flow(flow_id, spec?)` | Approve a draft — only confirmed flows run. |
+| `prufa_run_flow(flow_id, credentials?)` | Execute a confirmed flow. |
+| `prufa_set_flow_credentials(flow_id, credentials)` | Store `{{VAR}}` values (write-only). |
+| `prufa_edit_flow(flow_id, spec)` | Edit the spec (returns it to draft). |
+| `prufa_get_flow` · `prufa_list_flows` · `prufa_delete_flow` | Read · list · remove. |
 
-The audit already detects your flows for you (the `flows` check in every report).
-Turn them on at **[prufa.dev](https://prufa.dev)** — free audits look, monitors walk.
+### Monitors (watch a URL or flow on a schedule)
+| Tool | What it does |
+|---|---|
+| `prufa_start_monitor(url, cadence?, flow_id?)` | 1-click monitor; returns a deploy-hook secret **once**. |
+| `prufa_trigger_monitor(monitor_id)` | Run now (rate-capped). |
+| `prufa_pause_monitor` · `prufa_resume_monitor` · `prufa_get_monitor` · `prufa_list_monitors` · `prufa_delete_monitor` | Lifecycle. |
+| `prufa_rotate_monitor_webhook(monitor_id)` | Rotate the deploy-hook secret. |
+| `prufa_list_monitor_deliveries(monitor_id)` | Deploy-hook delivery log + CI snippets. |
+
+### Gremlin (chaos QA)
+| Tool | What it does |
+|---|---|
+| `prufa_run_gremlin(url, persona?, direction?, credentials?)` | Imitate a difficult user; detectors verify what breaks. Mutations dry-run unless authorized; payments never execute. |
+| `prufa_rerun_gremlin(run_id)` | Re-run a past gremlin with the same intent + saved login. |
+| `prufa_authorize_domain(host, allow_mutation?)` | Allow real (non-payment) writes on a host you own. |
+| `prufa_list_gremlin_domains()` | List mutation authorizations. |
+| `prufa_gremlin_saved_logins()` | Reuse a prior login (owning workspace only — sensitive). |
+| `prufa_promote_gremlin_path(share_token, path_index)` | Turn a reproduced bug path into a draft flow. |
+
+### Discovery (full-auto — crawl, infer flows, draft them)
+| Tool | What it does |
+|---|---|
+| `prufa_register_discovery_domain(domain)` | Register a domain, get the DNS TXT record to publish. |
+| `prufa_verify_discovery_domain(domain_id)` | Verify the DNS proof. |
+| `prufa_list_discovery_domains` · `prufa_revoke_discovery_domain` | Manage authorized domains. |
+| `prufa_run_discovery(url)` | Crawl a verified site and draft its meaningful flows. |
+| `prufa_get_discovery(discovery_id)` | Run status + the flows it surfaced. |
+
+Plus `prufa_health_check()` (probe the server/API).
+
+## The free trial, and when to upgrade
+
+`prufa_setup_workspace` mints a **free `agent_temp` workspace**: no card, a 7-day
+trial, and an included credit budget. Monitors, discovery, and full-length
+gremlin runs work during the trial, then need a paid plan.
+
+The MCP makes this legible to your agent: `prufa_get_usage`, `prufa_setup_workspace`,
+and every metered result carry a `trial` block (days + credits remaining) and,
+when you're low on credits or near the trial's end, an `upsell` block with a
+`message_for_human` your agent can relay plus the exact tool to call
+(`prufa_upgrade_plan` / `prufa_buy_credits`). When a Pro tool is called off-plan,
+the `402` passes through with a `checkout_url` — no silent failures, no surprise
+charges.
 
 ## Examples
 

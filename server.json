@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.prufa-dev/prufa-mcp",
-  "description": "Real-browser QA audit for any URL — broken flows, JS errors, a11y, more; graded A-F.",
+  "description": "The full Prufa QA agent over MCP (44 tools): real-browser audits, flows, monitors, gremlin chaos runs, full-auto discovery, workspace + billing.",
   "repository": {
     "url": "https://github.com/prufa-dev/prufa-mcp",
     "source": "github"
   },
-  "version": "0.1.5",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "prufa-mcp",
-      "version": "0.1.5",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },
