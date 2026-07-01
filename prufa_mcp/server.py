@@ -23,12 +23,15 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
+from prufa_mcp import __version__
 from prufa_mcp import audit as _audit
 from prufa_mcp import tools as _tools  # noqa: F401 — import registers every tool
 from prufa_mcp.http import err_result
 from prufa_mcp.registry import REGISTRY
 
-server = Server("prufa-mcp")
+# Pass the package version explicitly; without it the SDK reports the mcp
+# library version in serverInfo.version instead of ours.
+server = Server("prufa-mcp", version=__version__)
 
 
 def _missing_token_result() -> dict:
