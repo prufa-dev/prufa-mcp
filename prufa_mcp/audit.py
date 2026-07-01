@@ -72,14 +72,21 @@ def _api_token() -> str:
     """Resolve the API token fresh on every call.
 
     Precedence: ``PRUFA_API_TOKEN`` env var (so runtime env always wins and
-    token rotation needs no restart), then ``api_token`` from the config
-    file, then empty. Module-level capture (the v0.1.0 pattern) broke tests
-    that set the env var after import — reading per-call avoids that.
+    token rotation needs no restart), then the ``PRUFA_API_KEY`` alias, then
+    ``api_token`` (or the ``api_key`` alias) from the config file, then empty.
+    Module-level capture (the v0.1.0 pattern) broke tests that set the env var
+    after import — reading per-call avoids that.
+
+    ``PRUFA_API_KEY`` is accepted as an alias because early integration docs
+    (and the CLI) name the variable that way; honoring it means a config that
+    sets ``PRUFA_API_KEY`` authenticates instead of silently running
+    anonymous (no-silent-failures). ``PRUFA_API_TOKEN`` is canonical.
     """
-    env = os.environ.get("PRUFA_API_TOKEN")
+    env = os.environ.get("PRUFA_API_TOKEN") or os.environ.get("PRUFA_API_KEY")
     if env:
         return env
-    return str(_load_config().get("api_token") or "")
+    cfg = _load_config()
+    return str(cfg.get("api_token") or cfg.get("api_key") or "")
 
 
 def _api_base() -> str:

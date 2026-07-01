@@ -286,6 +286,28 @@ def test_config_file_provides_token_when_env_unset(
     assert _api_base() == "https://cfg.example"
 
 
+def test_api_key_alias_env_authenticates(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """PRUFA_API_KEY is honored as an alias so early/CLI-style configs don't
+    silently run anonymous. PRUFA_API_TOKEN, when both are set, still wins."""
+    monkeypatch.setenv("PRUFA_CONFIG", str(tmp_path / "none.json"))
+    monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
+    monkeypatch.setenv("PRUFA_API_KEY", "from-key-alias")
+    assert _api_token() == "from-key-alias"
+
+    monkeypatch.setenv("PRUFA_API_TOKEN", "canonical")
+    assert _api_token() == "canonical"
+
+
+def test_config_api_key_alias(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """The config file's ``api_key`` is accepted as an alias for ``api_token``."""
+    monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
+    monkeypatch.delenv("PRUFA_API_KEY", raising=False)
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({"api_key": "cfg-key-alias"}))
+    monkeypatch.setenv("PRUFA_CONFIG", str(cfg))
+    assert _api_token() == "cfg-key-alias"
+
+
 def test_env_overrides_config_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """Env vars win over the config file, so existing setups never change."""
     cfg = tmp_path / "mcp.json"
