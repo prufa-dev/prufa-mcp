@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "prufa": {
+      "command": "uvx",
+      "args": ["prufa-mcp"],
+      "env": {
+        "PRUFA_API_TOKEN": "your-prufa-api-key"
+      }
+    }
+  }
+}
