@@ -146,3 +146,44 @@ def test_upsell_silent_when_healthy() -> None:
 
 def test_upsell_never_for_paid() -> None:
     assert upsell({"tier": "pro", "available_credits": 0, "calls_included": 500}) is None
+
+
+# --- free-audit -> workspace funnel -------------------------------------------
+
+
+def test_anonymous_next_step_shape() -> None:
+    from prufa_mcp.conversion import anonymous_next_step
+
+    b = anonymous_next_step()
+    assert b["setup_tool"] == "prufa_setup_workspace"
+    assert b["state"] == "anonymous"
+    assert len(b["unlocks"]) >= 3
+    assert "message_for_human" in b
+
+
+def test_anonymous_audit_attaches_workspace_unlock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token-less audit result carries the workspace_unlock funnel block."""
+    from prufa_mcp.tools import audit as at
+
+    async def fake_run_audit(*, url, wait=True):
+        return {"status": "queued", "share_token": "s"}
+
+    monkeypatch.setattr(at._audit, "run_audit", fake_run_audit)
+    monkeypatch.setattr(at._audit, "_api_token", lambda: "")
+    res = asyncio.run(at.t_run_audit({"url": "https://x.com", "wait": False}))
+    unlock = res["structuredContent"]["workspace_unlock"]
+    assert unlock["setup_tool"] == "prufa_setup_workspace"
+    assert unlock["unlocks"]
+
+
+def test_authed_audit_has_no_workspace_unlock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a token set, the funnel block is NOT attached (already converted)."""
+    from prufa_mcp.tools import audit as at
+
+    async def fake_run_audit(*, url, wait=True):
+        return {"status": "queued", "share_token": "s"}
+
+    monkeypatch.setattr(at._audit, "run_audit", fake_run_audit)
+    monkeypatch.setattr(at._audit, "_api_token", lambda: "tok")
+    res = asyncio.run(at.t_run_audit({"url": "https://x.com", "wait": False}))
+    assert "workspace_unlock" not in res["structuredContent"]

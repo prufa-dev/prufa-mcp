@@ -17,20 +17,47 @@ from prufa_mcp.audit import (
 )
 
 
-def test_run_audit_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without PRUFA_API_TOKEN, run_audit returns a clear missing_token error."""
+def test_run_audit_anonymous_sends_no_auth_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Without a token the audit runs ANONYMOUSLY (no key, no card) — it makes
+    the request with NO Authorization header instead of short-circuiting."""
     monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
-    result = asyncio.run(run_audit(url="https://example.com", wait=False))
-    assert result["error"] == "missing_token", f"Expected missing_token, got {result}"
-    assert "PRUFA_API_TOKEN" in result["hint"], "Hint should mention the env var"
+    monkeypatch.setenv("PRUFA_CONFIG", str(tmp_path / "none.json"))  # no config token
+    captured: dict[str, Any] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        return httpx.Response(202, json={"run_id": "r", "status": "queued", "report_url": "/r/s"})
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_run_audit(transport, "https://example.com", wait=False))
+
+    assert captured["auth"] is None, "anonymous audit must not send an Authorization header"
+    assert result["status"] == "queued"
+    assert result["share_token"] == "s"
 
 
-def test_get_report_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without PRUFA_API_TOKEN, get_report returns a clear missing_token error."""
+def test_get_report_anonymous_sends_no_auth_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Without a token, a share_token report fetch works anonymously (the
+    by-token endpoint is public) — no Authorization header, real data back."""
     monkeypatch.delenv("PRUFA_API_TOKEN", raising=False)
-    result = asyncio.run(get_report(report_id="rep_test123"))
-    assert result["error"] == "missing_token", f"Expected missing_token, got {result}"
-    assert "PRUFA_API_TOKEN" in result["hint"], "Hint should mention the env var"
+    monkeypatch.setenv("PRUFA_CONFIG", str(tmp_path / "none.json"))
+    captured: dict[str, Any] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["path"] = request.url.path
+        return httpx.Response(200, json={"status": "succeeded", "findings": []})
+
+    transport = httpx.MockTransport(_handler)
+    result = asyncio.run(_probe_get_report(transport, "some-share-token"))
+
+    assert captured["auth"] is None, "anonymous report fetch must not send an Authorization header"
+    assert captured["path"] == "/api/v1/reports/by-token/some-share-token"
+    assert result["status"] == "succeeded"
 
 
 # --- Bug-fix regression tests (v0.1.1) ----------------------------------------

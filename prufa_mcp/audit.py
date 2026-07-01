@@ -142,21 +142,34 @@ def _share_token_from_report_url(report_url: str | None) -> str | None:
     return tail.split("/")[0].split("?")[0] or None
 
 
+def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Attach the Bearer header only when a token is configured.
+
+    The public audit + report endpoints work anonymously (POST /api/v1/audits
+    and the /reports/by-token/ read take no auth — the free 60-second audit is
+    the first tool call, no key, no card). So a token-less call proceeds
+    UNAUTHENTICATED instead of short-circuiting; a token, when present, just
+    lifts the anonymous per-IP rate limit and attributes the run.
+    """
+    headers: dict[str, str] = dict(extra or {})
+    token = _api_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
     """Trigger a public-page audit on a URL.
 
     When `wait` is True (default), blocks until the audit reaches a
     terminal state and returns the JSON report. When False, returns
     immediately with the queued state — caller polls via `get_report`.
-    """
-    if not _api_token():
-        return {
-            "error": "missing_token",
-            "hint": "Set PRUFA_API_TOKEN to a Prufa API key. Run `prufa-mcp setup` for a guided flow.",
-            "docs": "https://prufa.dev/docs/mcp",
-        }
 
-    headers = {"Authorization": f"Bearer {_api_token()}", "Idempotency-Key": f"mcp-{url}"}
+    No token required: the audit runs anonymously (rate-limited per IP). A
+    PRUFA_API_TOKEN, when set, attributes the run to the workspace and lifts
+    the anonymous limit.
+    """
+    headers = _auth_headers({"Idempotency-Key": f"mcp-{url}"})
     async with httpx.AsyncClient(timeout=30.0) as client:
         # The API ignores `wait` on creation — it always returns 202 queued.
         create = await _send_with_retry(
@@ -191,7 +204,7 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
                 run_resp = await _send_with_retry(
                     client.get,
                     f"{_api_base()}/api/v1/audits/{run_id}",
-                    headers={"Authorization": f"Bearer {_api_token()}"},
+                    headers=_auth_headers(),
                 )
             except httpx.HTTPError:
                 continue
@@ -203,13 +216,13 @@ async def run_audit(*, url: str, wait: bool = True) -> dict[str, Any]:
                     rep_resp = await _send_with_retry(
                         client.get,
                         f"{_api_base()}/api/v1/reports/by-token/{share_token}",
-                        headers={"Authorization": f"Bearer {_api_token()}"},
+                        headers=_auth_headers(),
                     )
                 else:
                     rep_resp = await _send_with_retry(
                         client.get,
                         f"{_api_base()}/api/v1/audits/{run_id}/report.json",
-                        headers={"Authorization": f"Bearer {_api_token()}"},
+                        headers=_auth_headers(),
                     )
                 if rep_resp.status_code == 200:
                     report = rep_resp.json()
@@ -248,17 +261,13 @@ async def get_report(*, report_id: str) -> dict[str, Any]:
     shape. UUIDs (8-4-4-4-12 hex) are routed to the legacy auth
     endpoint; everything else is treated as a share_token.
     """
-    if not _api_token():
-        return {
-            "error": "missing_token",
-            "hint": "Set PRUFA_API_TOKEN to a Prufa API key.",
-            "docs": "https://prufa.dev/docs/mcp",
-        }
-
     if not report_id:
         return {"error": "invalid_arguments", "hint": "report_id is required"}
 
-    headers = {"Authorization": f"Bearer {_api_token()}"}
+    # No token required for the public share_token report. The UUID report
+    # endpoint may still require auth; a token-less UUID fetch surfaces the
+    # API's 401/404 cleanly rather than short-circuiting here.
+    headers = _auth_headers()
 
     # Validate-or-route: real UUIDs hit the legacy /audits/{uuid}/report.json
     # endpoint; everything else is a share_token and hits the by-token
