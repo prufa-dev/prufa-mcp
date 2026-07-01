@@ -127,6 +127,38 @@ def upsell(usage: dict | None, *, trial_expires_at: str | None = None) -> dict |
     }
 
 
+# What a (free, no-card) workspace unlocks beyond the anonymous audit — the
+# top-of-funnel nudge attached to token-less audit results.
+WORKSPACE_UNLOCKS = [
+    "saved multi-step flows (login, checkout, any journey) that run end-to-end",
+    "scheduled monitors with email/Slack alerts on regressions",
+    "full-auto discovery (crawl the app and draft its flows)",
+    "gremlin chaos runs (a difficult-user agent that pokes the app)",
+    "run history + machine-readable findings you can diff over time",
+]
+
+
+def anonymous_next_step() -> dict:
+    """The free-audit -> workspace conversion hook.
+
+    Attached to a token-less (anonymous) audit result so the agent knows the
+    audit it just ran is the shallow public-page surface, and that deeper
+    checks are one free, no-card step away. Mirrors the paid `upsell` block but
+    at the anonymous -> workspace boundary.
+    """
+    return {
+        "state": "anonymous",
+        "message_for_human": (
+            "That was a free anonymous audit of public pages. Prufa can go much "
+            "deeper with a free workspace (no card, 7-day trial, 100 credits): "
+            "multi-step flows behind logins, scheduled monitors with alerts, "
+            "full-auto discovery, and gremlin chaos runs. Want me to set one up?"
+        ),
+        "setup_tool": "prufa_setup_workspace",
+        "unlocks": WORKSPACE_UNLOCKS,
+    }
+
+
 def annotate_usage_result(data: dict) -> dict:
     """Attach an ``upsell`` block to a result dict that carries a ``usage``
     object (monitor/flow/gremlin responses). No-op when usage is absent or the

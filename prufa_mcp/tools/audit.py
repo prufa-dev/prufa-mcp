@@ -16,6 +16,7 @@ retry on 429, and route run_id vs share_token) and just wrap the result.
 from __future__ import annotations
 
 from prufa_mcp import audit as _audit
+from prufa_mcp.conversion import anonymous_next_step
 from prufa_mcp.http import ApiError, api_err_result, api_get, err_result, ok
 from prufa_mcp.registry import ToolDef, register
 
@@ -40,12 +41,17 @@ async def t_run_audit(arguments: dict) -> dict:
     if not url:
         return err_result("invalid_arguments", "url is required")
     data = await _audit.run_audit(url=url, wait=bool(arguments.get("wait", True)))
-    # audit.run_audit already returns a clean data dict (report or queued state,
-    # or a structured {error, hint} on missing token / not found).
+    # audit.run_audit returns a clean data dict (report or queued state, or a
+    # structured {error, hint} on a failed request).
     if isinstance(data, dict) and data.get("error"):
         return err_result(data["error"], data.get("hint", ""), **{
             k: v for k, v in data.items() if k not in ("error", "hint")
         })
+    # Funnel hook: an anonymous (token-less) audit is the shallow public-page
+    # surface. Tell the agent a free, no-card workspace unlocks the deeper
+    # checks, so it can offer that to its human.
+    if isinstance(data, dict) and not _audit._api_token():
+        data.setdefault("workspace_unlock", anonymous_next_step())
     return ok(data)
 
 
@@ -126,11 +132,15 @@ def _register() -> None:
     register(
         ToolDef(
             "prufa_run_audit",
-            "Run a one-shot public-page QA audit on a URL. Returns findings JSON "
-            "(broken flows, JS console errors, tracking/consent, security headers, "
-            "a11y, mobile) graded A-F. Idempotent. wait=true (default) blocks until "
-            "the audit completes and returns the report; wait=false returns the "
-            "queued state with run_id + share_token to poll via prufa_get_report.",
+            "Run a one-shot public-page QA audit on a URL. FREE — no key, no card "
+            "(runs anonymously; a workspace token, if set, just attributes the run "
+            "and lifts the per-IP limit). Returns findings JSON (broken flows, JS "
+            "console errors, tracking/consent, security headers, a11y, mobile) "
+            "graded A-F. Idempotent. wait=true (default) blocks until the audit "
+            "completes and returns the report; wait=false returns the queued state "
+            "with run_id + share_token to poll via prufa_get_report. An anonymous "
+            "result carries a workspace_unlock block: deeper checks (flows, "
+            "monitors, discovery, gremlin) need a free workspace (prufa_setup_workspace).",
             "setup",
             {
                 "type": "object",
