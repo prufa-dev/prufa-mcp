@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -41,7 +41,7 @@ def _no_token(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
 
 def _future(days: int) -> str:
-    return (datetime.now(UTC) + timedelta(days=days, hours=1)).isoformat()
+    return (datetime.now(timezone.utc) + timedelta(days=days, hours=1)).isoformat()
 
 
 # --- registration -------------------------------------------------------------

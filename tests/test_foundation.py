@@ -120,9 +120,9 @@ def test_get_finding_filters_by_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_trial_block_derives_days() -> None:
-    from datetime import UTC, datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    exp = (datetime.now(UTC) + timedelta(days=5, hours=1)).isoformat()
+    exp = (datetime.now(timezone.utc) + timedelta(days=5, hours=1)).isoformat()
     block = trial_block(
         {"tier": "agent_temp", "available_credits": 40, "calls_included": 50},
         is_in_trial=True,

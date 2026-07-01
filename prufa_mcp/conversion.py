@@ -23,7 +23,7 @@ Nothing is hardcoded; a field we can't derive is omitted, never faked.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # Capabilities that require a paid plan (or the trial) — surfaced so the agent
@@ -46,8 +46,8 @@ def _days_remaining(trial_expires_at: str | None) -> int | None:
     except (ValueError, AttributeError):
         return None
     if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=UTC)
-    delta = exp - datetime.now(UTC)
+        exp = exp.replace(tzinfo=timezone.utc)
+    delta = exp - datetime.now(timezone.utc)
     return max(0, delta.days)
 
 
