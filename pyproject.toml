@@ -45,7 +45,7 @@ Repository = "https://github.com/prufa-dev/prufa-mcp"
 Issues = "https://github.com/prufa-dev/prufa-mcp/issues"
 
 [tool.setuptools]
-packages = ["prufa_mcp"]
+packages = ["prufa_mcp", "prufa_mcp.tools"]
 
 [tool.setuptools.dynamic]
 version = { attr = "prufa_mcp.__version__" }
